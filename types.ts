@@ -2,6 +2,8 @@
 export type Player = 'black' | 'white';
 export type CellValue = Player | null;
 
+export type GameMode = 'PvP' | 'PvE'; // Player vs Player | Player vs Environment
+
 export interface Coordinate {
   x: number;
   y: number;
@@ -11,6 +13,7 @@ export interface Coordinate {
 export interface GameConfig {
   gridSize: number;
   winLength: number;
+  gameMode: GameMode;
 }
 
 export interface GameState {
@@ -51,4 +54,19 @@ export interface IWinStrategy {
     lastMove: Coordinate, 
     winLength: number
   ): { winner: Player | null; winningLine: Coordinate[] | null };
+}
+
+/**
+ * Strategy interface for Computer Logic.
+ */
+export interface IAIStrategy {
+  /**
+   * Calculates the best move for the computer.
+   * Returns only (x, y) because z is determined by the MoveStrategy (Gravity).
+   */
+  calculateMove(
+    board: CellValue[][][], 
+    currentPlayer: Player, 
+    winLength: number
+  ): { x: number, y: number };
 }

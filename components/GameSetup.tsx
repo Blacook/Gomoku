@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { GameConfig } from '../types';
+import { GameConfig, GameMode } from '../types';
 
 interface GameSetupProps {
   onStart: (config: GameConfig) => void;
@@ -8,10 +8,11 @@ interface GameSetupProps {
 export const GameSetup: React.FC<GameSetupProps> = ({ onStart }) => {
   const [gridSize, setGridSize] = useState(4);
   const [winLength, setWinLength] = useState(4);
+  const [gameMode, setGameMode] = useState<GameMode>('PvE');
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    onStart({ gridSize, winLength });
+    onStart({ gridSize, winLength, gameMode });
   };
 
   // Adjust win length automatically if grid size becomes smaller than current win length
@@ -30,6 +31,41 @@ export const GameSetup: React.FC<GameSetupProps> = ({ onStart }) => {
         </h1>
         
         <form onSubmit={handleSubmit} className="space-y-6">
+          {/* Game Mode Selection */}
+          <div>
+            <label className="block text-sm font-medium text-slate-400 mb-2">
+              Game Mode
+            </label>
+            <div className="flex justify-between gap-2">
+               <button
+                  type="button"
+                  onClick={() => setGameMode('PvE')}
+                  className={`flex-1 py-3 rounded-lg font-bold transition-all flex flex-col items-center gap-1 ${
+                    gameMode === 'PvE' 
+                      ? 'bg-emerald-600 text-white shadow-lg shadow-emerald-500/30' 
+                      : 'bg-slate-700 text-slate-300 hover:bg-slate-600'
+                  }`}
+                >
+                  <span>1 Player</span>
+                  <span className="text-[10px] font-normal opacity-80">(vs CPU)</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setGameMode('PvP')}
+                  className={`flex-1 py-3 rounded-lg font-bold transition-all flex flex-col items-center gap-1 ${
+                    gameMode === 'PvP' 
+                      ? 'bg-pink-600 text-white shadow-lg shadow-pink-500/30' 
+                      : 'bg-slate-700 text-slate-300 hover:bg-slate-600'
+                  }`}
+                >
+                  <span>2 Players</span>
+                  <span className="text-[10px] font-normal opacity-80">(Local)</span>
+                </button>
+            </div>
+          </div>
+
+          <div className="h-px bg-slate-700 w-full" />
+
           <div>
             <label className="block text-sm font-medium text-slate-400 mb-2">
               Field Size (Size x Size x Size)

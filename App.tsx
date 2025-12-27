@@ -5,12 +5,13 @@ import { BoardLayer } from './components/BoardLayer';
 import { Board3D } from './components/Board3D';
 import { useGame } from './hooks/useGame';
 import { GravityMoveStrategy, StandardWinStrategy } from './logic/strategies';
+import { HeuristicAIStrategy } from './logic/aiStrategies';
 
 const App: React.FC = () => {
   // Dependency Injection: Initialize strategies
-  // In the future, we could swap 'GravityMoveStrategy' with 'FreePlacementStrategy' based on user config.
   const moveStrategy = useMemo(() => new GravityMoveStrategy(), []);
   const winStrategy = useMemo(() => new StandardWinStrategy(), []);
+  const aiStrategy = useMemo(() => new HeuristicAIStrategy(), []);
 
   const {
     config,
@@ -21,7 +22,7 @@ const App: React.FC = () => {
     makeMove,
     undoMove,
     returnToSetup
-  } = useGame({ gridSize: 4, winLength: 4 }, moveStrategy, winStrategy);
+  } = useGame({ gridSize: 4, winLength: 4, gameMode: 'PvE' }, moveStrategy, winStrategy, aiStrategy);
 
   const [viewMode, setViewMode] = useState<ViewMode>(ViewMode.CUBE_3D);
 
@@ -44,6 +45,18 @@ const App: React.FC = () => {
     );
   }
 
+  // Determine display text for the turn indicator
+  let turnText = '';
+  if (gameState.winner) {
+    turnText = 'Game Over';
+  } else {
+    if (config.gameMode === 'PvE') {
+        turnText = gameState.currentPlayer === 'black' ? 'Your Turn' : 'Computer Thinking...';
+    } else {
+        turnText = gameState.currentPlayer === 'black' ? "Black's Turn" : "White's Turn";
+    }
+  }
+
   return (
     <div className="min-h-screen bg-slate-900 text-slate-100 font-sans flex flex-col">
       {/* Header / Info Bar */}
@@ -56,15 +69,15 @@ const App: React.FC = () => {
                 </svg>
              </button>
              <h1 className="text-xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-blue-400 to-indigo-200 hidden sm:block">
-                3D Gomoku (Gravity)
+                3D Gomoku <span className="text-xs font-normal text-slate-400 ml-1">({config.gameMode === 'PvE' ? 'vs CPU' : 'PvP'})</span>
              </h1>
           </div>
           
           <div className="flex items-center gap-6">
-             <div className="flex items-center gap-2 px-4 py-1.5 bg-slate-800 rounded-full border border-slate-700">
-                <div className={`w-3 h-3 rounded-full ${gameState.currentPlayer === 'black' ? 'bg-slate-900 shadow-[inset_-1px_-1px_2px_rgba(255,255,255,0.2)]' : 'bg-slate-100'}`}></div>
-                <span className="text-sm font-medium text-slate-300">
-                    {gameState.winner ? 'Game Over' : `${gameState.currentPlayer === 'black' ? 'Black' : 'White'}'s Turn`}
+             <div className="flex items-center gap-2 px-4 py-1.5 bg-slate-800 rounded-full border border-slate-700 min-w-[140px] justify-center">
+                <div className={`w-3 h-3 rounded-full transition-colors duration-300 ${gameState.currentPlayer === 'black' ? 'bg-slate-900 shadow-[inset_-1px_-1px_2px_rgba(255,255,255,0.2)]' : 'bg-slate-100'}`}></div>
+                <span className="text-sm font-medium text-slate-300 whitespace-nowrap">
+                    {turnText}
                 </span>
              </div>
              
@@ -89,7 +102,10 @@ const App: React.FC = () => {
         {gameState.winner && (
             <div className="mb-8 p-4 bg-gradient-to-r from-yellow-500/20 to-orange-500/20 border border-yellow-500/50 rounded-xl animate-bounce-slow text-center relative z-20">
                 <h2 className="text-2xl font-bold text-yellow-400">
-                    {gameState.winner === 'black' ? 'Black' : 'White'} Wins!
+                    {config.gameMode === 'PvE' 
+                        ? (gameState.winner === 'black' ? 'You Win!' : 'Computer Wins!') 
+                        : (gameState.winner === 'black' ? 'Black Wins!' : 'White Wins!')
+                    }
                 </h2>
                 <p className="text-sm text-yellow-200/70 mt-1">
                     Press Reset to play again
@@ -132,10 +148,10 @@ const App: React.FC = () => {
                         onCellClick={makeMove}
                         winningLine={gameState.winningLine}
                         lastMove={lastMove}
-                        gameActive={gameStatus === 'playing'}
+                        gameActive={gameStatus === 'playing' && (config.gameMode === 'PvP' || gameState.currentPlayer === 'black')}
                     />
                      <p className="text-center text-slate-500 text-sm mt-4">
-                        Drag to rotate. Click any column to drop a stone.
+                        Drag to rotate. Scroll to zoom.
                      </p>
                 </div>
             ) : (
@@ -149,7 +165,7 @@ const App: React.FC = () => {
                                 onCellClick={makeMove}
                                 winningLine={gameState.winningLine}
                                 lastMove={lastMove}
-                                isActive={gameStatus === 'playing' && !gameState.winner}
+                                isActive={gameStatus === 'playing' && !gameState.winner && (config.gameMode === 'PvP' || gameState.currentPlayer === 'black')}
                             />
                         </div>
                     ))}
