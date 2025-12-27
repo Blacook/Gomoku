@@ -1,0 +1,5 @@
+{
+  "name": "3D Gomoku (立体五目並べ)",
+  "description": "A 3D strategy game where two players compete to align 4 stones in a 3D grid. Features adjustable board size, 3D visualization, and layer-by-layer strategic views.",
+  "requestFramePermissions": []
+}
