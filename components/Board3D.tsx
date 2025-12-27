@@ -25,23 +25,25 @@ export const Board3D: React.FC<Board3DProps> = ({
   const containerRef = useRef<HTMLDivElement>(null);
 
   // --- Constants for Layout ---
-  const CELL_SIZE = 60; // Diameter of the stone
-  const GAP = 30;       // Gap between stone centers
-  const PITCH = CELL_SIZE + GAP; // Center-to-center distance
+  const CELL_SIZE = 50; // Stone diameter
+  const GAP = 25;       // Gap between stones
+  const PITCH = CELL_SIZE + GAP; // Distance between pole centers
   
-  const POLE_DIAMETER = 12; // Visual thickness of the pole
-  const BASE_THICKNESS = 20;
+  const POLE_SIZE = 10; // Thickness of the square prism pole
+  const BASE_THICKNESS = 15; // Thickness of the base board
   
   // Calculate offsets to center the board at (0,0,0)
-  // Grid coordinates go from 0 to gridSize-1
-  // We want the center of the grid to be at 0.
-  const centerOffset = ((gridSize - 1) * PITCH) / 2;
+  // The grid spans from 0 to (gridSize-1) * PITCH
+  const totalGridWidth = (gridSize - 1) * PITCH;
+  const centerOffset = totalGridWidth / 2;
 
-  // Board dimensions for the base plate
-  // The base should cover the area from the outer edge of the first pole to the outer edge of the last pole
-  // plus some padding.
-  const BOARD_WIDTH = (gridSize - 1) * PITCH + CELL_SIZE + 20; 
-  const POLE_HEIGHT = (gridSize * PITCH) + 40; // Tall enough for all layers
+  // Board physical size (visual)
+  // Add some padding around the outer poles
+  const BOARD_PADDING = PITCH / 1.5;
+  const BOARD_WIDTH = totalGridWidth + BOARD_PADDING * 2; 
+  
+  // Height of poles: enough to hold all layers plus a bit extra tip
+  const POLE_HEIGHT = (gridSize * PITCH) + 20;
 
   const handleMouseDown = (e: React.MouseEvent | React.TouchEvent) => {
     setIsDragging(true);
@@ -94,20 +96,23 @@ export const Board3D: React.FC<Board3DProps> = ({
       }
   }
 
-  // Wood Texture Styles
-  // Simulating a cylinder using a gradient that is dark on edges and light in center
-  const woodPoleTexture = `linear-gradient(to right, #3E2723, #5D4037 30%, #8D6E63 50%, #5D4037 70%, #3E2723)`;
-  
-  const woodBaseTop = {
-    backgroundColor: '#5D4037',
-    backgroundImage: `repeating-linear-gradient(90deg, rgba(0,0,0,0.1) 0px, rgba(0,0,0,0.1) 1px, transparent 1px, transparent 20px), 
-                      linear-gradient(to bottom, rgba(255,255,255,0.1), rgba(0,0,0,0.2))`,
-    boxShadow: 'inset 0 0 20px rgba(0,0,0,0.6)'
+  // Textures
+  const poleFaceStyle = {
+    background: 'linear-gradient(90deg, #3E2723, #5D4037 40%, #795548 50%, #5D4037 60%, #3E2723)',
   };
   
-  const woodBaseSide = {
-    backgroundColor: '#3E2723',
-    backgroundImage: 'linear-gradient(to bottom, rgba(0,0,0,0.3), rgba(0,0,0,0.6))',
+  const baseTopStyle = {
+    background: '#5D4037',
+    backgroundImage: `
+      repeating-linear-gradient(90deg, rgba(0,0,0,0.1) 0px, rgba(0,0,0,0.1) 1px, transparent 1px, transparent 20px),
+      radial-gradient(circle at center, rgba(255,255,255,0.1), transparent)
+    `,
+    boxShadow: 'inset 0 0 30px rgba(0,0,0,0.6)'
+  };
+  
+  const baseSideStyle = {
+    background: 'linear-gradient(to bottom, #4E342E, #3E2723)',
+    borderTop: '1px solid #6D4C41'
   };
 
   return (
@@ -123,117 +128,148 @@ export const Board3D: React.FC<Board3DProps> = ({
         </div>
 
       <div
-        className="relative transition-transform duration-75 ease-linear preserve-3d"
+        className="relative transition-transform duration-75 ease-linear"
         style={{
           transformStyle: 'preserve-3d',
-          transform: `perspective(1200px) rotateX(${rotation.x}deg) rotateY(${rotation.y}deg)`,
+          transform: `perspective(1000px) rotateX(${rotation.x}deg) rotateY(${rotation.y}deg)`,
           width: 0,
           height: 0,
         }}
       >
-        {/* 
-            COORDINATE SYSTEM:
-            X: Horizontal
-            Y: Vertical (CSS Y is down, so negative Y is UP)
-            Z: Depth
-
-            Center is (0,0,0).
+        {/* === SCENE CONTAINER === 
+            Center (0,0,0) is in the middle of the grid horizontally/depth-wise.
+            Y=0 is the vertical center of the first stone (Level 0).
         */}
 
-        {/* === BASE PLATE === */}
         {/* 
-           Level 1 stone center is at Y = 0 (vertically).
-           Stone radius is CELL_SIZE / 2.
-           Stone bottom is at Y = +CELL_SIZE/2.
-           Therefore, Base Top Surface should be at Y = CELL_SIZE/2.
+            BASE PLATE 
+            Position: Top surface should touch the bottom of Level 0 stones.
+            Level 0 stone center is Y = 0.
+            Stone radius = CELL_SIZE / 2.
+            So Stone Bottom = +CELL_SIZE/2.
+            Base Top = +CELL_SIZE/2.
         */}
-        <div className="absolute transform-style-3d pointer-events-none" style={{
-            transform: `translate3d(0, ${CELL_SIZE/2}px, 0)`
-        }}>
-            {/* Top Face */}
-            <div className="absolute origin-center border border-amber-900/50" style={{
+        <div 
+            className="absolute"
+            style={{
+                transformStyle: 'preserve-3d',
+                transform: `translateY(${CELL_SIZE/2}px)`,
+                width: 0, height: 0
+            }}
+        >
+            {/* Top Face (Y=0 relative to base group) */}
+            <div className="absolute" style={{
                 width: BOARD_WIDTH,
                 height: BOARD_WIDTH,
                 transform: `translate(-50%, -50%) rotateX(90deg)`,
-                ...woodBaseTop
+                ...baseTopStyle
             }} />
+
+            {/* Side Faces - Creating a Box of thickness BASE_THICKNESS */}
             
-            {/* Front Face */}
-            <div className="absolute origin-top border border-amber-900/50" style={{
+            {/* Front */}
+            <div className="absolute" style={{
                 width: BOARD_WIDTH,
                 height: BASE_THICKNESS,
                 transform: `translate(-50%, 0) translateZ(${BOARD_WIDTH/2}px)`,
-                ...woodBaseSide
+                ...baseSideStyle
             }} />
             
-            {/* Back Face */}
-            <div className="absolute origin-top border border-amber-900/50" style={{
+            {/* Back */}
+            <div className="absolute" style={{
                 width: BOARD_WIDTH,
                 height: BASE_THICKNESS,
                 transform: `translate(-50%, 0) translateZ(${-BOARD_WIDTH/2}px) rotateY(180deg)`,
-                ...woodBaseSide
+                ...baseSideStyle
             }} />
             
-            {/* Left Face */}
-            <div className="absolute origin-top border border-amber-900/50" style={{
-                width: BOARD_WIDTH,
-                height: BASE_THICKNESS,
-                transform: `translate(-50%, 0) rotateY(-90deg) translateZ(${BOARD_WIDTH/2}px)`,
-                ...woodBaseSide
-            }} />
-            
-             {/* Right Face */}
-             <div className="absolute origin-top border border-amber-900/50" style={{
+            {/* Right */}
+            <div className="absolute" style={{
                 width: BOARD_WIDTH,
                 height: BASE_THICKNESS,
                 transform: `translate(-50%, 0) rotateY(90deg) translateZ(${BOARD_WIDTH/2}px)`,
-                ...woodBaseSide
+                ...baseSideStyle
             }} />
 
-            {/* Bottom Face */}
-            <div className="absolute origin-top border border-amber-900/50" style={{
+            {/* Left */}
+            <div className="absolute" style={{
+                width: BOARD_WIDTH,
+                height: BASE_THICKNESS,
+                transform: `translate(-50%, 0) rotateY(-90deg) translateZ(${BOARD_WIDTH/2}px)`,
+                ...baseSideStyle
+            }} />
+            
+            {/* Bottom */}
+            <div className="absolute" style={{
                 width: BOARD_WIDTH,
                 height: BOARD_WIDTH,
-                transform: `translate(-50%, ${BASE_THICKNESS}px) rotateX(-90deg)`,
-                backgroundColor: '#2e1e1a'
+                transform: `translate(-50%, -50%) translateY(${BASE_THICKNESS}px) rotateX(90deg)`,
+                background: '#2D1B18'
             }} />
         </div>
 
         {/* === POLES === */}
         {columns.map(({x, y}) => {
-             // Calculate center position relative to (0,0,0)
              const px = (x * PITCH) - centerOffset;
              const pz = (y * PITCH) - centerOffset;
              
-             // Base Top is at Y = CELL_SIZE/2. Pole grows UP from there (Negative Y direction in CSS)
-             // But actually, we can just position it at the base and translate up.
-             
+             // Poles start from Base Top (Y = CELL_SIZE/2) and go UP (negative Y)
+             const poleBaseY = CELL_SIZE / 2;
+
              return (
                  <div
                     key={`pole-${x}-${y}`}
-                    className="absolute transform-style-3d pointer-events-none"
+                    className="absolute"
                     style={{
-                        transform: `translate3d(${px}px, ${CELL_SIZE/2}px, ${pz}px)`,
+                        transformStyle: 'preserve-3d',
+                        transform: `translate3d(${px}px, ${poleBaseY}px, ${pz}px)`,
                     }}
                  >
-                    {/* 
-                       IMPOSTER CYLINDER (Cross-Plane) 
-                       Two intersecting planes with gradient texture.
-                       This is much lighter than a polygon and looks very round for thin poles.
-                    */}
-                    <div className="absolute origin-bottom" style={{
-                        width: POLE_DIAMETER,
-                        height: POLE_HEIGHT,
-                        background: woodPoleTexture,
-                        transform: `translate(-50%, -100%) rotateY(0deg)`, // -100% Y to grow upwards
-                    }} />
-                    
-                    <div className="absolute origin-bottom" style={{
-                        width: POLE_DIAMETER,
-                        height: POLE_HEIGHT,
-                        background: woodPoleTexture,
-                        transform: `translate(-50%, -100%) rotateY(90deg)`,
-                    }} />
+                     {/* 
+                         Square Prism Pole (4 Faces) 
+                         Growing UP from the origin (which is the base top).
+                         Height: POLE_HEIGHT.
+                         Width/Depth: POLE_SIZE.
+                     */}
+                     
+                     {/* Front Face */}
+                     <div className="absolute" style={{
+                         width: POLE_SIZE, height: POLE_HEIGHT,
+                         transformOrigin: 'bottom center',
+                         transform: `translate(-50%, -100%) translateZ(${POLE_SIZE/2}px)`,
+                         ...poleFaceStyle
+                     }} />
+                     
+                     {/* Back Face */}
+                     <div className="absolute" style={{
+                         width: POLE_SIZE, height: POLE_HEIGHT,
+                         transformOrigin: 'bottom center',
+                         transform: `translate(-50%, -100%) rotateY(180deg) translateZ(${POLE_SIZE/2}px)`,
+                         ...poleFaceStyle
+                     }} />
+                     
+                     {/* Right Face */}
+                     <div className="absolute" style={{
+                         width: POLE_SIZE, height: POLE_HEIGHT,
+                         transformOrigin: 'bottom center',
+                         transform: `translate(-50%, -100%) rotateY(90deg) translateZ(${POLE_SIZE/2}px)`,
+                         ...poleFaceStyle
+                     }} />
+                     
+                     {/* Left Face */}
+                     <div className="absolute" style={{
+                         width: POLE_SIZE, height: POLE_HEIGHT,
+                         transformOrigin: 'bottom center',
+                         transform: `translate(-50%, -100%) rotateY(-90deg) translateZ(${POLE_SIZE/2}px)`,
+                         ...poleFaceStyle
+                     }} />
+                     
+                     {/* Top Cap (Optional, mainly for high angles) */}
+                     <div className="absolute" style={{
+                         width: POLE_SIZE, height: POLE_SIZE,
+                         transform: `translate(-50%, -${POLE_HEIGHT}px) rotateX(90deg)`,
+                         background: '#4E342E'
+                     }} />
                  </div>
              )
         })}
@@ -245,9 +281,9 @@ export const Board3D: React.FC<Board3DProps> = ({
               
               const px = (x * PITCH) - centerOffset;
               const pz = (y * PITCH) - centerOffset;
-              // Level 0 (bottom) is at Y=0.
+              // Level z is vertically UP from Level 0.
+              // Level 0 is at Y=0.
               // Level 1 is at Y = -PITCH.
-              // Level z is at Y = -z * PITCH.
               const py = -(z * PITCH);
 
               const isWinning = winningLine?.some(c => c.x === x && c.y === y && c.z === z);
@@ -258,26 +294,23 @@ export const Board3D: React.FC<Board3DProps> = ({
                   key={`${x}-${y}-${z}`}
                   className="absolute"
                   style={{
-                    // Centered exactly at the coordinate
+                    transformStyle: 'preserve-3d',
                     transform: `translate3d(${px}px, ${py}px, ${pz}px)`,
-                    width: 0, 
-                    height: 0,
-                    transformStyle: 'preserve-3d'
+                    width: 0, height: 0,
                   }}
                 >
-                  {/* 
-                     BILLBOARD WRAPPER 
-                     We create a container of size 0x0 at the exact center.
-                     Then we render the stone centered on that point.
-                  */}
+                  {/* Billboard Stone */}
                   <div 
                     style={{ 
                         transform: `rotateY(${-rotation.y}deg) rotateX(${-rotation.x}deg)`,
                         width: CELL_SIZE,
                         height: CELL_SIZE,
-                        marginLeft: -CELL_SIZE/2, // Center the div
-                        marginTop: -CELL_SIZE/2,  // Center the div
-                        transition: 'transform 0.1s linear'
+                        // Center the stone image on the coordinate
+                        position: 'absolute',
+                        left: -CELL_SIZE/2,
+                        top: -CELL_SIZE/2,
+                        transition: 'transform 0.1s linear',
+                        pointerEvents: 'auto'
                     }}
                   >
                     <Cell
