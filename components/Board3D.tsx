@@ -20,6 +20,7 @@ export const Board3D: React.FC<Board3DProps> = ({
   gameActive
 }) => {
   const [rotation, setRotation] = useState({ x: -20, y: 30 });
+  const [zoom, setZoom] = useState(0); // Added zoom state
   const [isDragging, setIsDragging] = useState(false);
   const lastMousePos = useRef({ x: 0, y: 0 });
   const containerRef = useRef<HTMLDivElement>(null);
@@ -45,7 +46,11 @@ export const Board3D: React.FC<Board3DProps> = ({
   // Height of poles: enough to hold all layers plus a bit extra tip
   const POLE_HEIGHT = (gridSize * PITCH) + 20;
 
+  // --- Interaction Handlers ---
+
   const handleMouseDown = (e: React.MouseEvent | React.TouchEvent) => {
+    // Only start drag if clicking directly on the container or empty space, 
+    // to avoid conflict if we click on UI buttons (though they are absolutely positioned on top)
     setIsDragging(true);
     const clientX = 'touches' in e ? e.touches[0].clientX : e.clientX;
     const clientY = 'touches' in e ? e.touches[0].clientY : e.clientY;
@@ -71,6 +76,31 @@ export const Board3D: React.FC<Board3DProps> = ({
 
   const handleMouseUp = () => {
     setIsDragging(false);
+  };
+
+  // Zoom Handler (Wheel)
+  const handleWheel = (e: React.WheelEvent) => {
+    // Prevent default scrolling behaviour is hard with React synthetic events sometimes,
+    // but usually setting overflow: hidden on parent works.
+    const delta = -Math.sign(e.deltaY) * 50;
+    setZoom(prev => Math.max(-1200, Math.min(600, prev + delta)));
+  };
+
+  // Zoom Controls
+  const handleZoomIn = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    setZoom(prev => Math.min(600, prev + 100));
+  };
+
+  const handleZoomOut = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    setZoom(prev => Math.max(-1200, prev - 100));
+  };
+
+  const handleResetView = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    setRotation({ x: -20, y: 30 });
+    setZoom(0);
   };
 
   useEffect(() => {
@@ -117,38 +147,65 @@ export const Board3D: React.FC<Board3DProps> = ({
 
   return (
     <div 
-      className="relative w-full h-[600px] flex items-center justify-center overflow-hidden cursor-move touch-none bg-slate-900/50 rounded-xl border border-slate-700"
+      className="relative w-full h-[600px] flex items-center justify-center overflow-hidden cursor-move touch-none bg-slate-900/50 rounded-xl border border-slate-700 select-none"
       onMouseDown={handleMouseDown}
       onTouchStart={handleMouseDown}
+      onWheel={handleWheel}
       ref={containerRef}
     >
-       <div className="absolute top-4 left-4 text-xs text-slate-400 pointer-events-none z-10 bg-slate-900/80 p-2 rounded backdrop-blur border border-slate-700">
-            <p>Drag to rotate view</p>
-            <p>Click any pole to drop a stone</p>
+        {/* Info Overlay */}
+        <div className="absolute top-4 left-4 pointer-events-none z-10 flex flex-col gap-2">
+            <div className="text-xs text-slate-400 bg-slate-900/80 p-2 rounded backdrop-blur border border-slate-700">
+                <p>Drag to rotate</p>
+                <p>Scroll to zoom</p>
+                <p>Click pole to drop</p>
+            </div>
+        </div>
+
+        {/* Zoom Controls */}
+        <div className="absolute top-4 right-4 z-10 flex flex-col gap-2">
+            <button 
+                onClick={handleZoomIn}
+                className="w-10 h-10 flex items-center justify-center bg-slate-800/80 hover:bg-slate-700 text-slate-200 rounded-lg backdrop-blur border border-slate-600 shadow-lg transition-colors"
+                title="Zoom In"
+            >
+                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                </svg>
+            </button>
+            <button 
+                onClick={handleZoomOut}
+                className="w-10 h-10 flex items-center justify-center bg-slate-800/80 hover:bg-slate-700 text-slate-200 rounded-lg backdrop-blur border border-slate-600 shadow-lg transition-colors"
+                title="Zoom Out"
+            >
+                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20 12H4" />
+                </svg>
+            </button>
+            <button 
+                onClick={handleResetView}
+                className="w-10 h-10 flex items-center justify-center bg-slate-800/80 hover:bg-slate-700 text-slate-400 hover:text-white rounded-lg backdrop-blur border border-slate-600 shadow-lg transition-colors mt-2"
+                title="Reset View"
+            >
+                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                </svg>
+            </button>
         </div>
 
       <div
         className="relative transition-transform duration-75 ease-linear"
         style={{
           transformStyle: 'preserve-3d',
-          transform: `perspective(1000px) rotateX(${rotation.x}deg) rotateY(${rotation.y}deg)`,
+          // Apply zoom via translateZ. Perspective stays fixed.
+          transform: `perspective(1000px) translateZ(${zoom}px) rotateX(${rotation.x}deg) rotateY(${rotation.y}deg)`,
           width: 0,
           height: 0,
         }}
       >
-        {/* === SCENE CONTAINER === 
-            Center (0,0,0) is in the middle of the grid horizontally/depth-wise.
-            Y=0 is the vertical center of the first stone (Level 0).
-        */}
+        {/* === SCENE CONTAINER === */}
 
-        {/* 
-            BASE PLATE 
-            Position: Top surface should touch the bottom of Level 0 stones.
-            Level 0 stone center is Y = 0.
-            Stone radius = CELL_SIZE / 2.
-            So Stone Bottom = +CELL_SIZE/2.
-            Base Top = +CELL_SIZE/2.
-        */}
+        {/* BASE PLATE */}
         <div 
             className="absolute"
             style={{
@@ -165,8 +222,6 @@ export const Board3D: React.FC<Board3DProps> = ({
                 ...baseTopStyle
             }} />
 
-            {/* Side Faces - Creating a Box of thickness BASE_THICKNESS */}
-            
             {/* Front */}
             <div className="absolute" style={{
                 width: BOARD_WIDTH,
@@ -212,8 +267,6 @@ export const Board3D: React.FC<Board3DProps> = ({
         {columns.map(({x, y}) => {
              const px = (x * PITCH) - centerOffset;
              const pz = (y * PITCH) - centerOffset;
-             
-             // Poles start from Base Top (Y = CELL_SIZE/2) and go UP (negative Y)
              const poleBaseY = CELL_SIZE / 2;
 
              return (
@@ -225,13 +278,6 @@ export const Board3D: React.FC<Board3DProps> = ({
                         transform: `translate3d(${px}px, ${poleBaseY}px, ${pz}px)`,
                     }}
                  >
-                     {/* 
-                         Square Prism Pole (4 Faces) 
-                         Growing UP from the origin (which is the base top).
-                         Height: POLE_HEIGHT.
-                         Width/Depth: POLE_SIZE.
-                     */}
-                     
                      {/* Front Face */}
                      <div className="absolute" style={{
                          width: POLE_SIZE, height: POLE_HEIGHT,
@@ -264,7 +310,7 @@ export const Board3D: React.FC<Board3DProps> = ({
                          ...poleFaceStyle
                      }} />
                      
-                     {/* Top Cap (Optional, mainly for high angles) */}
+                     {/* Top Cap */}
                      <div className="absolute" style={{
                          width: POLE_SIZE, height: POLE_SIZE,
                          transform: `translate(-50%, -${POLE_HEIGHT}px) rotateX(90deg)`,
@@ -281,9 +327,6 @@ export const Board3D: React.FC<Board3DProps> = ({
               
               const px = (x * PITCH) - centerOffset;
               const pz = (y * PITCH) - centerOffset;
-              // Level z is vertically UP from Level 0.
-              // Level 0 is at Y=0.
-              // Level 1 is at Y = -PITCH.
               const py = -(z * PITCH);
 
               const isWinning = winningLine?.some(c => c.x === x && c.y === y && c.z === z);
@@ -305,7 +348,6 @@ export const Board3D: React.FC<Board3DProps> = ({
                         transform: `rotateY(${-rotation.y}deg) rotateX(${-rotation.x}deg)`,
                         width: CELL_SIZE,
                         height: CELL_SIZE,
-                        // Center the stone image on the coordinate
                         position: 'absolute',
                         left: -CELL_SIZE/2,
                         top: -CELL_SIZE/2,
