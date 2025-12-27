@@ -1,118 +1,31 @@
-import React, { useState, useEffect } from 'react';
-import { GameConfig, GameState, Player, ViewMode, Coordinate } from './types';
-import { createEmptyBoard, checkWin, isBoardFull, getNextOpenZ } from './utils/gameUtils';
+import React, { useState, useMemo } from 'react';
+import { ViewMode } from './types';
 import { GameSetup } from './components/GameSetup';
 import { BoardLayer } from './components/BoardLayer';
 import { Board3D } from './components/Board3D';
+import { useGame } from './hooks/useGame';
+import { GravityMoveStrategy, StandardWinStrategy } from './logic/strategies';
 
 const App: React.FC = () => {
-  const [gameStatus, setGameStatus] = useState<'setup' | 'playing' | 'finished'>('setup');
-  const [config, setConfig] = useState<GameConfig>({ gridSize: 4, winLength: 4 });
-  const [gameState, setGameState] = useState<GameState>({
-    board: [],
-    currentPlayer: 'black',
-    winner: null,
-    winningLine: null,
-    history: [],
-    isDraw: false,
-  });
-  const [viewMode, setViewMode] = useState<ViewMode>(ViewMode.CUBE_3D); // Default to 3D for this mode
+  // Dependency Injection: Initialize strategies
+  // In the future, we could swap 'GravityMoveStrategy' with 'FreePlacementStrategy' based on user config.
+  const moveStrategy = useMemo(() => new GravityMoveStrategy(), []);
+  const winStrategy = useMemo(() => new StandardWinStrategy(), []);
 
-  // Initialize audio context for simple SFX (optional, keeping it silent/visual only for simplicity unless requested)
+  const {
+    config,
+    gameState,
+    gameStatus,
+    startGame,
+    resetGame,
+    makeMove,
+    undoMove,
+    returnToSetup
+  } = useGame({ gridSize: 4, winLength: 4 }, moveStrategy, winStrategy);
 
-  const startGame = (newConfig: GameConfig) => {
-    setConfig(newConfig);
-    setGameState({
-      board: createEmptyBoard(newConfig.gridSize),
-      currentPlayer: 'black',
-      winner: null,
-      winningLine: null,
-      history: [],
-      isDraw: false,
-    });
-    setGameStatus('playing');
-    setViewMode(ViewMode.CUBE_3D);
-  };
+  const [viewMode, setViewMode] = useState<ViewMode>(ViewMode.CUBE_3D);
 
-  const handleCellClick = (x: number, y: number, z: number) => {
-    if (gameStatus !== 'playing') return;
-
-    // GRAVITY LOGIC:
-    // Ignore the specific Z clicked. Find the lowest available Z in this (x, y) column.
-    const targetZ = getNextOpenZ(gameState.board, x, y);
-
-    // If column is full (targetZ is -1), do nothing
-    if (targetZ === -1) return;
-
-    const newBoard = gameState.board.map((layer, lIdx) => 
-      lIdx === targetZ 
-        ? layer.map((row, rIdx) => 
-            rIdx === y 
-              ? row.map((cell, cIdx) => cIdx === x ? gameState.currentPlayer : cell)
-              : row
-          )
-        : layer
-    );
-
-    const lastMove = { x, y, z: targetZ };
-    const { winner, winningLine } = checkWin(newBoard, config.gridSize, config.winLength, lastMove);
-    const draw = !winner && isBoardFull(newBoard, config.gridSize);
-
-    setGameState(prev => ({
-      board: newBoard,
-      currentPlayer: prev.currentPlayer === 'black' ? 'white' : 'black',
-      winner,
-      winningLine,
-      history: [...prev.history, lastMove],
-      isDraw: draw,
-    }));
-
-    if (winner || draw) {
-      setGameStatus('finished');
-    }
-  };
-
-  const resetGame = () => {
-    setGameState({
-      board: createEmptyBoard(config.gridSize),
-      currentPlayer: 'black',
-      winner: null,
-      winningLine: null,
-      history: [],
-      isDraw: false,
-    });
-    setGameStatus('playing');
-  };
-
-  const undoMove = () => {
-    if (gameState.history.length === 0 || gameStatus === 'finished') return;
-    
-    const lastMove = gameState.history[gameState.history.length - 1];
-    const { x, y, z } = lastMove;
-
-    const newBoard = gameState.board.map((layer, lIdx) => 
-      lIdx === z 
-        ? layer.map((row, rIdx) => 
-            rIdx === y 
-              ? row.map((cell, cIdx) => cIdx === x ? null : cell)
-              : row
-          )
-        : layer
-    );
-
-    setGameState(prev => ({
-      board: newBoard,
-      currentPlayer: prev.currentPlayer === 'black' ? 'white' : 'black',
-      winner: null,
-      winningLine: null,
-      history: prev.history.slice(0, -1),
-      isDraw: false,
-    }));
-  };
-
-  const returnToSetup = () => {
-    setGameStatus('setup');
-  };
+  const lastMove = gameState.history[gameState.history.length - 1];
 
   if (gameStatus === 'setup') {
     return (
@@ -130,8 +43,6 @@ const App: React.FC = () => {
       </div>
     );
   }
-
-  const lastMove = gameState.history[gameState.history.length - 1];
 
   return (
     <div className="min-h-screen bg-slate-900 text-slate-100 font-sans flex flex-col">
@@ -218,7 +129,7 @@ const App: React.FC = () => {
                     <Board3D 
                         board={gameState.board}
                         gridSize={config.gridSize}
-                        onCellClick={handleCellClick}
+                        onCellClick={makeMove}
                         winningLine={gameState.winningLine}
                         lastMove={lastMove}
                         gameActive={gameStatus === 'playing'}
@@ -235,7 +146,7 @@ const App: React.FC = () => {
                                 layerIndex={index}
                                 grid={layer}
                                 gridSize={config.gridSize}
-                                onCellClick={handleCellClick}
+                                onCellClick={makeMove}
                                 winningLine={gameState.winningLine}
                                 lastMove={lastMove}
                                 isActive={gameStatus === 'playing' && !gameState.winner}
