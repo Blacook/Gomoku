@@ -6,27 +6,72 @@ import { Board3D } from './components/Board3D';
 import { useGame } from './hooks/useGame';
 import { GravityMoveStrategy, StandardWinStrategy } from './logic/strategies';
 import { HeuristicAIStrategy } from './logic/aiStrategies';
+import { PeerNetworkStrategy } from './logic/networkStrategy';
 
 const App: React.FC = () => {
   // Dependency Injection: Initialize strategies
   const moveStrategy = useMemo(() => new GravityMoveStrategy(), []);
   const winStrategy = useMemo(() => new StandardWinStrategy(), []);
   const aiStrategy = useMemo(() => new HeuristicAIStrategy(), []);
+  const networkStrategy = useMemo(() => new PeerNetworkStrategy(), []);
 
   const {
     config,
     gameState,
     gameStatus,
     startGame,
+    hostOnlineGame,
+    joinOnlineGame,
     resetGame,
     makeMove,
     undoMove,
     returnToSetup
-  } = useGame({ gridSize: 4, winLength: 4, gameMode: 'PvE' }, moveStrategy, winStrategy, aiStrategy);
+  } = useGame({ gridSize: 4, winLength: 4, gameMode: 'PvE' }, moveStrategy, winStrategy, aiStrategy, networkStrategy);
 
   const [viewMode, setViewMode] = useState<ViewMode>(ViewMode.CUBE_3D);
 
   const lastMove = gameState.history[gameState.history.length - 1];
+
+  // Copy ID helper
+  const copyToClipboard = () => {
+      if (gameState.networkRoomId) {
+          navigator.clipboard.writeText(gameState.networkRoomId);
+          alert('Room ID copied to clipboard!');
+      }
+  };
+
+  // --- Online Waiting Screen ---
+  // Check this BEFORE standard setup check to show connecting status immediately
+  if (config.gameMode === 'Online' && (gameState.networkStatus === 'connecting' || gameState.networkStatus === 'waiting_opponent')) {
+     return (
+        <div className="min-h-screen bg-slate-900 text-slate-100 flex items-center justify-center p-4">
+            <div className="bg-slate-800 p-8 rounded-2xl border border-slate-700 max-w-md w-full text-center shadow-2xl">
+                {gameState.networkStatus === 'connecting' && (
+                     <div className="flex flex-col items-center">
+                         <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-cyan-500 mb-4"></div>
+                         <h2 className="text-xl font-bold">Connecting to server...</h2>
+                     </div>
+                )}
+                {gameState.networkStatus === 'waiting_opponent' && (
+                     <div className="flex flex-col items-center">
+                         <h2 className="text-xl font-bold mb-2 text-cyan-400">Waiting for Opponent...</h2>
+                         <p className="text-slate-400 mb-6">Share this Room ID with your friend:</p>
+                         
+                         <div className="bg-slate-900 p-4 rounded-lg border border-slate-600 flex items-center gap-2 mb-6 w-full">
+                            <code className="flex-1 text-lg font-mono text-white break-all">{gameState.networkRoomId}</code>
+                            <button onClick={copyToClipboard} className="p-2 hover:bg-slate-700 rounded transition-colors text-slate-300">
+                                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" /></svg>
+                            </button>
+                         </div>
+                         
+                         <div className="animate-pulse text-sm text-slate-500">Listening for connection...</div>
+                         <button onClick={returnToSetup} className="mt-8 text-slate-400 hover:text-white underline text-sm">Cancel</button>
+                     </div>
+                )}
+            </div>
+        </div>
+     );
+  }
 
   if (gameStatus === 'setup') {
     return (
@@ -39,19 +84,33 @@ const App: React.FC = () => {
                 </svg>
              </div>
            </header>
-          <GameSetup onStart={startGame} />
+          <GameSetup 
+            onStart={startGame} 
+            onHost={hostOnlineGame}
+            onJoin={joinOnlineGame}
+          />
         </div>
       </div>
     );
   }
 
-  // Determine display text for the turn indicator
+  // --- Main Game Logic for Display Text ---
   let turnText = '';
+  let statusColor = 'bg-slate-800';
+  
   if (gameState.winner) {
     turnText = 'Game Over';
   } else {
     if (config.gameMode === 'PvE') {
         turnText = gameState.currentPlayer === 'black' ? 'Your Turn' : 'Computer Thinking...';
+    } else if (config.gameMode === 'Online') {
+        if (gameState.currentPlayer === config.myPlayerColor) {
+             turnText = "Your Turn";
+             statusColor = 'bg-green-900/50 border-green-700';
+        } else {
+             turnText = "Opponent's Turn";
+             statusColor = 'bg-slate-800';
+        }
     } else {
         turnText = gameState.currentPlayer === 'black' ? "Black's Turn" : "White's Turn";
     }
@@ -69,12 +128,22 @@ const App: React.FC = () => {
                 </svg>
              </button>
              <h1 className="text-xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-blue-400 to-indigo-200 hidden sm:block">
-                3D Gomoku <span className="text-xs font-normal text-slate-400 ml-1">({config.gameMode === 'PvE' ? 'vs CPU' : 'PvP'})</span>
+                3D Gomoku 
+                <span className="text-xs font-normal text-slate-400 ml-1">
+                ({config.gameMode === 'PvE' ? 'vs CPU' : config.gameMode === 'Online' ? 'Online P2P' : 'PvP'})
+                </span>
              </h1>
           </div>
           
           <div className="flex items-center gap-6">
-             <div className="flex items-center gap-2 px-4 py-1.5 bg-slate-800 rounded-full border border-slate-700 min-w-[140px] justify-center">
+             {config.gameMode === 'Online' && (
+                 <div className="hidden md:flex items-center gap-2 text-xs text-slate-500 bg-slate-800 px-3 py-1 rounded-lg">
+                    <span className={`w-2 h-2 rounded-full ${gameState.networkStatus === 'connected' ? 'bg-green-500' : 'bg-red-500'}`}></span>
+                    {gameState.currentPlayer === config.myPlayerColor ? 'You are ' + (config.myPlayerColor === 'black' ? 'Black' : 'White') : 'Opponent'}
+                 </div>
+             )}
+
+             <div className={`flex items-center gap-2 px-4 py-1.5 rounded-full border border-slate-700 min-w-[140px] justify-center transition-colors ${statusColor}`}>
                 <div className={`w-3 h-3 rounded-full transition-colors duration-300 ${gameState.currentPlayer === 'black' ? 'bg-slate-900 shadow-[inset_-1px_-1px_2px_rgba(255,255,255,0.2)]' : 'bg-slate-100'}`}></div>
                 <span className="text-sm font-medium text-slate-300 whitespace-nowrap">
                     {turnText}
@@ -85,7 +154,7 @@ const App: React.FC = () => {
                 onClick={undoMove}
                 disabled={gameState.history.length === 0 || !!gameState.winner}
                 className="p-2 text-slate-400 hover:text-white disabled:opacity-30 transition-colors"
-                title="Undo"
+                title="Undo last move"
              >
                 <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6" />
@@ -104,7 +173,9 @@ const App: React.FC = () => {
                 <h2 className="text-2xl font-bold text-yellow-400">
                     {config.gameMode === 'PvE' 
                         ? (gameState.winner === 'black' ? 'You Win!' : 'Computer Wins!') 
-                        : (gameState.winner === 'black' ? 'Black Wins!' : 'White Wins!')
+                        : config.gameMode === 'Online'
+                            ? (gameState.winner === config.myPlayerColor ? 'You Win!' : 'You Lose!')
+                            : (gameState.winner === 'black' ? 'Black Wins!' : 'White Wins!')
                     }
                 </h2>
                 <p className="text-sm text-yellow-200/70 mt-1">
@@ -148,7 +219,11 @@ const App: React.FC = () => {
                         onCellClick={makeMove}
                         winningLine={gameState.winningLine}
                         lastMove={lastMove}
-                        gameActive={gameStatus === 'playing' && (config.gameMode === 'PvP' || gameState.currentPlayer === 'black')}
+                        gameActive={gameStatus === 'playing' && (
+                            config.gameMode === 'PvP' || 
+                            (config.gameMode === 'PvE' && gameState.currentPlayer === 'black') ||
+                            (config.gameMode === 'Online' && gameState.currentPlayer === config.myPlayerColor)
+                        )}
                     />
                      <p className="text-center text-slate-500 text-sm mt-4">
                         Drag to rotate. Scroll to zoom.
@@ -165,7 +240,11 @@ const App: React.FC = () => {
                                 onCellClick={makeMove}
                                 winningLine={gameState.winningLine}
                                 lastMove={lastMove}
-                                isActive={gameStatus === 'playing' && !gameState.winner && (config.gameMode === 'PvP' || gameState.currentPlayer === 'black')}
+                                isActive={gameStatus === 'playing' && !gameState.winner && (
+                                    config.gameMode === 'PvP' || 
+                                    (config.gameMode === 'PvE' && gameState.currentPlayer === 'black') ||
+                                    (config.gameMode === 'Online' && gameState.currentPlayer === config.myPlayerColor)
+                                )}
                             />
                         </div>
                     ))}

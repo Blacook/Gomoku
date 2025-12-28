@@ -2,7 +2,7 @@
 export type Player = 'black' | 'white';
 export type CellValue = Player | null;
 
-export type GameMode = 'PvP' | 'PvE'; // Player vs Player | Player vs Environment
+export type GameMode = 'PvP' | 'PvE' | 'Online'; // Added Online
 
 export interface Coordinate {
   x: number;
@@ -14,6 +14,7 @@ export interface GameConfig {
   gridSize: number;
   winLength: number;
   gameMode: GameMode;
+  myPlayerColor?: Player; // For Online mode
 }
 
 export interface GameState {
@@ -23,6 +24,8 @@ export interface GameState {
   winningLine: Coordinate[] | null;
   history: Coordinate[];
   isDraw: boolean;
+  networkStatus?: 'disconnected' | 'connecting' | 'waiting_opponent' | 'connected';
+  networkRoomId?: string;
 }
 
 export enum ViewMode {
@@ -32,22 +35,10 @@ export enum ViewMode {
 
 // --- SOLID Refactoring Interfaces ---
 
-/**
- * Strategy interface for determining where a stone lands.
- * Supports different mechanics (e.g., Gravity vs Free Placement).
- */
 export interface IMoveStrategy {
-  /**
-   * Calculates the actual placement coordinate based on user input.
-   * @returns The accepted coordinate or null if the move is invalid.
-   */
   determinePosition(board: CellValue[][][], input: Coordinate): Coordinate | null;
 }
 
-/**
- * Strategy interface for checking win conditions.
- * Supports different rules (e.g., Line-4, Square-4, etc).
- */
 export interface IWinStrategy {
   checkWin(
     board: CellValue[][][], 
@@ -56,17 +47,20 @@ export interface IWinStrategy {
   ): { winner: Player | null; winningLine: Coordinate[] | null };
 }
 
-/**
- * Strategy interface for Computer Logic.
- */
 export interface IAIStrategy {
-  /**
-   * Calculates the best move for the computer.
-   * Returns only (x, y) because z is determined by the MoveStrategy (Gravity).
-   */
   calculateMove(
     board: CellValue[][][], 
     currentPlayer: Player, 
     winLength: number
   ): { x: number, y: number };
+}
+
+/**
+ * Interface for Network Communication
+ */
+export interface INetworkStrategy {
+  hostGame(onOpen: (id: string) => void, onData: (data: any) => void, onConnect: () => void): void;
+  joinGame(hostId: string, onData: (data: any) => void, onConnect: () => void): void;
+  sendData(data: any): void;
+  disconnect(): void;
 }

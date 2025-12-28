@@ -1,11 +1,12 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
-import { GameConfig, GameState, IMoveStrategy, IWinStrategy, IAIStrategy, CellValue, Coordinate, Player } from '../types';
+import { GameConfig, GameState, IMoveStrategy, IWinStrategy, IAIStrategy, INetworkStrategy, CellValue, Coordinate, Player } from '../types';
 
 export const useGame = (
   initialConfig: GameConfig,
   moveStrategy: IMoveStrategy,
   winStrategy: IWinStrategy,
-  aiStrategy: IAIStrategy // Injected AI
+  aiStrategy: IAIStrategy,
+  networkStrategy: INetworkStrategy
 ) => {
   const [config, setConfig] = useState<GameConfig>(initialConfig);
   
@@ -24,40 +25,155 @@ export const useGame = (
     winningLine: null,
     history: [],
     isDraw: false,
+    networkStatus: 'disconnected',
+    networkRoomId: undefined
   });
+
+  // Use a Ref to access the latest gameState inside callbacks (like Network handlers)
+  // without triggering re-creation of those callbacks or suffering from stale closures.
+  const gameStateRef = useRef(gameState);
+  useEffect(() => {
+    gameStateRef.current = gameState;
+  }, [gameState]);
 
   const [gameStatus, setGameStatus] = useState<'setup' | 'playing' | 'finished'>('setup');
   const isComputerThinking = useRef(false);
 
-  const startGame = useCallback((newConfig: GameConfig) => {
+  // --- Network Event Handlers ---
+  
+  // Define performUndo first so it can be used in handleNetworkData
+  const performUndo = useCallback((isRemote: boolean) => {
+    const currentGameState = gameStateRef.current;
+
+    // Validation using Ref to ensure we have latest state
+    if (currentGameState.history.length === 0 || isComputerThinking.current) return;
+    
+    // In Online mode, if I initiate the undo (!isRemote), send message to opponent
+    if (config.gameMode === 'Online' && !isRemote) {
+        networkStrategy.sendData({ type: 'UNDO' });
+    }
+
+    setGameState(prev => {
+        // Double check inside setter for safety
+        if (prev.history.length === 0) return prev;
+
+        let stepsToUndo = 1;
+        
+        // PvE Logic: Undo 2 steps (Computer + Player)
+        if (config.gameMode === 'PvE') {
+            if (prev.currentPlayer === 'black' && prev.history.length >= 2) {
+                stepsToUndo = 2;
+            } else if (prev.currentPlayer === 'white') {
+               stepsToUndo = 1; 
+            } else {
+               return prev;
+            }
+        }
+        
+        // Online & PvP Logic: Undo 1 step
+
+        const newHistory = prev.history.slice(0, -stepsToUndo);
+        // Deep copy board to modify
+        const newBoard = JSON.parse(JSON.stringify(prev.board)); 
+        
+        // Remove stones
+        for (let i = 0; i < stepsToUndo; i++) {
+            const moveToRemove = prev.history[prev.history.length - 1 - i];
+            if (moveToRemove) {
+                newBoard[moveToRemove.z][moveToRemove.y][moveToRemove.x] = null;
+            }
+        }
+
+        let nextPlayer = prev.currentPlayer;
+        if (config.gameMode === 'PvP' || config.gameMode === 'Online') {
+            nextPlayer = prev.currentPlayer === 'black' ? 'white' : 'black';
+        } 
+        // PvE keeps same player if undid 2 steps
+
+        return {
+            ...prev,
+            board: newBoard,
+            currentPlayer: nextPlayer,
+            winner: null,
+            winningLine: null,
+            history: newHistory,
+            isDraw: false,
+        };
+    });
+  }, [config.gameMode, networkStrategy]);
+
+
+  const handleNetworkData = useCallback((data: any) => {
+    if (data.type === 'MOVE') {
+        const { x, y, z } = data;
+        applyMove(x, y, z, true);
+    } else if (data.type === 'RESET') {
+        startNewGame(config, true);
+    } else if (data.type === 'UNDO') {
+        performUndo(true);
+    }
+  }, [config, performUndo]); // performUndo is stable due to deps
+
+
+  // --- Game Actions ---
+
+  const startNewGame = useCallback((newConfig: GameConfig, preserveNetwork = false) => {
     setConfig(newConfig);
-    setGameState({
+    setGameState(prev => ({
       board: createEmptyBoard(newConfig.gridSize),
       currentPlayer: 'black',
       winner: null,
       winningLine: null,
       history: [],
       isDraw: false,
-    });
+      networkStatus: preserveNetwork ? prev.networkStatus : 'disconnected',
+      networkRoomId: preserveNetwork ? prev.networkRoomId : undefined
+    }));
     setGameStatus('playing');
     isComputerThinking.current = false;
   }, []);
 
-  const resetGame = useCallback(() => {
-    startGame(config);
-  }, [config, startGame]);
+  const startGame = useCallback((newConfig: GameConfig) => {
+    startNewGame(newConfig);
+  }, [startNewGame]);
 
-  const makeMove = useCallback((inputX: number, inputY: number, inputZ: number) => {
-    if (gameStatus !== 'playing') return;
+  const hostOnlineGame = useCallback((newConfig: GameConfig) => {
+    setConfig({...newConfig, myPlayerColor: 'black'});
+    setGameState(prev => ({ ...prev, networkStatus: 'connecting', board: createEmptyBoard(newConfig.gridSize) }));
+    
+    networkStrategy.hostGame(
+        (id) => {
+            setGameState(prev => ({ ...prev, networkRoomId: id, networkStatus: 'waiting_opponent' }));
+        },
+        handleNetworkData,
+        () => {
+            setGameState(prev => ({ ...prev, networkStatus: 'connected' }));
+            setGameStatus('playing');
+        }
+    );
+  }, [networkStrategy, handleNetworkData]);
 
-    setGameState(prevState => {
-        // 1. Delegate Position Logic to Strategy
+  const joinOnlineGame = useCallback((newConfig: GameConfig, roomId: string) => {
+    setConfig({...newConfig, myPlayerColor: 'white'});
+    setGameState(prev => ({ ...prev, networkStatus: 'connecting', board: createEmptyBoard(newConfig.gridSize) }));
+
+    networkStrategy.joinGame(
+        roomId,
+        handleNetworkData,
+        () => {
+            setGameState(prev => ({ ...prev, networkStatus: 'connected' }));
+            setGameStatus('playing');
+        }
+    );
+  }, [networkStrategy, handleNetworkData]);
+
+
+  // Defined simply for use in handleNetworkData/makeMove
+  function applyMove(inputX: number, inputY: number, inputZ: number, isRemote: boolean = false) {
+      setGameState(prevState => {
         const target = moveStrategy.determinePosition(prevState.board, { x: inputX, y: inputY, z: inputZ });
-
-        // If move is invalid (e.g. column full), do nothing
         if (!target) return prevState;
 
-        // 2. Apply Move
         const { x, y, z } = target;
         const newBoard = prevState.board.map((layer, lIdx) => 
           lIdx === z 
@@ -69,14 +185,12 @@ export const useGame = (
             : layer
         );
 
-        // 3. Delegate Win Logic to Strategy
         const { winner, winningLine } = winStrategy.checkWin(newBoard, target, config.winLength);
-        
-        // 4. Check Draw
         const isBoardFull = !newBoard.some(layer => layer.some(row => row.some(cell => cell === null)));
         const isDraw = !winner && isBoardFull;
 
         const nextState = {
+          ...prevState,
           board: newBoard,
           currentPlayer: prevState.currentPlayer === 'black' ? 'white' : 'black' as Player,
           winner,
@@ -85,110 +199,75 @@ export const useGame = (
           isDraw,
         };
         
-        // Side effect: Update status if game ended
         if (winner || isDraw) {
             setGameStatus('finished');
         }
 
+        if (!isRemote && config.gameMode === 'Online' && prevState.networkStatus === 'connected') {
+             networkStrategy.sendData({ type: 'MOVE', x: inputX, y: inputY, z: inputZ });
+        }
+
         return nextState;
     });
-  }, [config.winLength, gameStatus, moveStrategy, winStrategy]);
+  }
+
+
+  const makeMove = useCallback((inputX: number, inputY: number, inputZ: number) => {
+    if (gameStatus !== 'playing') return;
+
+    if (config.gameMode === 'Online') {
+        if (gameStateRef.current.currentPlayer !== config.myPlayerColor) return;
+    }
+
+    applyMove(inputX, inputY, inputZ, false);
+  }, [gameStatus, config]);
+
 
   // AI Turn Handling
   useEffect(() => {
     if (gameStatus !== 'playing' || config.gameMode !== 'PvE') return;
 
-    // Assuming Computer plays WHITE
     if (gameState.currentPlayer === 'white' && !gameState.winner && !isComputerThinking.current) {
         isComputerThinking.current = true;
         
-        // Add a delay for realism
         const timer = setTimeout(() => {
             const bestMove = aiStrategy.calculateMove(gameState.board, 'white', config.winLength);
-            // Z coordinate is irrelevant for makeMove if using Gravity, 
-            // but we pass 0 as placeholder since moveStrategy handles it.
-            // However, calculateMove returns (x, y).
-            makeMove(bestMove.x, bestMove.y, 0); 
+            applyMove(bestMove.x, bestMove.y, 0, false); 
             isComputerThinking.current = false;
         }, 600);
 
         return () => clearTimeout(timer);
     }
-  }, [gameState.currentPlayer, gameState.winner, gameStatus, config.gameMode, config.winLength, aiStrategy, gameState.board, makeMove]);
+  }, [gameState.currentPlayer, gameState.winner, gameStatus, config.gameMode, config.winLength, aiStrategy, gameState.board]);
 
 
   const undoMove = useCallback(() => {
-    if (gameState.history.length === 0 || gameStatus === 'finished' || isComputerThinking.current) return;
-    
-    // In PvE, if it's player's turn (Black), undoing means going back to Black's previous turn.
-    // So we need to pop 2 moves (White's move and Black's last move).
-    // If computer is currently thinking, we shouldn't undo.
-    
-    let stepsToUndo = 1;
-    if (config.gameMode === 'PvE') {
-        // If it's currently Black's turn (Player), we need to undo White (Computer) and Black (Player)
-        // to get back to Black's turn.
-        if (gameState.currentPlayer === 'black' && gameState.history.length >= 2) {
-            stepsToUndo = 2;
-        } else if (gameState.currentPlayer === 'white') {
-           // If it's computer's turn (very rare to catch this due to auto-play, but possible with fast clicks),
-           // just undo one.
-           stepsToUndo = 1; 
-        } else {
-           // Not enough history to undo fully
-           return;
-        }
+     performUndo(false);
+  }, [performUndo]);
+
+
+  const resetGame = useCallback(() => {
+    if (config.gameMode === 'Online') {
+         startNewGame(config, true);
+         networkStrategy.sendData({ type: 'RESET' });
+    } else {
+        startNewGame(config);
     }
-
-    setGameState(prev => {
-        const newHistory = prev.history.slice(0, -stepsToUndo);
-        
-        // Reconstruct board from scratch is safer/easier than un-applying moves for complex states,
-        // but for performance, we can just remove the specific stones if we know them.
-        // Let's create a fresh board and replay history for absolute correctness, 
-        // or just clear the cells. Clearing cells is faster.
-        
-        const newBoard = JSON.parse(JSON.stringify(prev.board)); // Deep copy
-        
-        // Remove the stones that are being undone
-        for (let i = 0; i < stepsToUndo; i++) {
-            const moveToRemove = prev.history[prev.history.length - 1 - i];
-            if (moveToRemove) {
-                newBoard[moveToRemove.z][moveToRemove.y][moveToRemove.x] = null;
-            }
-        }
-
-        // Determine previous player
-        // If PvP: simply toggle.
-        // If PvE and we undid 2 steps, currentPlayer remains the same (Black).
-        let nextPlayer = prev.currentPlayer;
-        if (config.gameMode === 'PvP') {
-            nextPlayer = prev.currentPlayer === 'black' ? 'white' : 'black';
-        } 
-        // In PvE, if we undid 2 steps (Black -> White -> Black), player stays Black.
-
-        return {
-            board: newBoard,
-            currentPlayer: nextPlayer,
-            winner: null,
-            winningLine: null,
-            history: newHistory,
-            isDraw: false,
-        };
-    });
-  }, [gameState, gameStatus, config.gameMode]);
-
+  }, [config, startNewGame, networkStrategy]);
 
   const returnToSetup = useCallback(() => {
+    networkStrategy.disconnect(); 
     setGameStatus('setup');
     isComputerThinking.current = false;
-  }, []);
+  }, [networkStrategy]);
 
   return {
     config,
     gameState,
     gameStatus,
     startGame,
+    hostOnlineGame,
+    joinOnlineGame,
     resetGame,
     makeMove,
     undoMove,
